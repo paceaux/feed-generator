@@ -2,7 +2,8 @@ import {
   OutputSchema as RepoEvent,
   isCommit,
 } from './lexicon/types/com/atproto/sync/subscribeRepos'
-import { FirehoseSubscriptionBase, getOpsByType } from './util/subscription'
+import { FirehoseSubscriptionBase, getOpsByType } from './util/subscription';
+import { hasPronounInText, getPronounFromText } from './util/pronouns';
 
 export class FirehoseSubscription extends FirehoseSubscriptionBase {
   async handleEvent(evt: RepoEvent) {
@@ -10,27 +11,30 @@ export class FirehoseSubscription extends FirehoseSubscriptionBase {
 
     const ops = await getOpsByType(evt)
 
-    // This logs the text of every post off the firehose.
-    // Just for fun :)
-    // Delete before actually using
-    for (const post of ops.posts.creates) {
-      console.log(post.record.text)
-    }
+
+    const supportedLanguages = ['en'];
+
+    // filter out posts that are not in supported languages
+    const postsForSupportedLanguages = ops.posts.creates.filter((post) => supportedLanguages.every((lang) => post?.record?.langs?.includes(lang)));
+
 
     const postsToDelete = ops.posts.deletes.map((del) => del.uri)
-    const postsToCreate = ops.posts.creates
-      .filter((create) => {
-        // only alf-related posts
-        return create.record.text.toLowerCase().includes('alf')
-      })
+    const postsToCreate = postsForSupportedLanguages
+      .filter((create) => hasPronounInText(create?.record?.text))
       .map((create) => {
-        // map alf-related posts to a db row
+        const pronoun = getPronounFromText(create?.record?.text);
         return {
           uri: create.uri,
           cid: create.cid,
+          text: create.record.text,
+          pronoun,
           indexedAt: new Date().toISOString(),
         }
-      })
+      });
+    
+    for (const post of postsToCreate) {
+      console.log(post);
+    }
 
     if (postsToDelete.length > 0) {
       await this.db
